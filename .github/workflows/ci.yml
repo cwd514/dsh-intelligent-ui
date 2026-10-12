@@ -1,0 +1,31 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Read the bundle manifest
+        run: |
+          node -e "const p = require('./package.json'); if (!p.dsh?.bundle?.patch) { throw new Error('package.json declares no dsh.bundle.patch'); } if (!p.dsh?.client) { throw new Error('package.json declares no dsh.client half'); } console.log(p.name, p.version, '->', p.dsh.bundle.patch)"
+
+      - name: Syntax check both halves
+        run: |
+          node --check index.js
+          node --check client.js
+
+      - name: Smoke test (158 checks)
+        run: node test/smoke.mjs
