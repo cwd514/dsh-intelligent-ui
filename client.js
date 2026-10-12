@@ -922,13 +922,17 @@ window.__ModuleLoader__.load({
 			return h(
 				'div',
 				{ className: `${P}-chart` },
-				asText(block.title) === undefined ? null : h('div', { className: `${P}-block-title` }, block.title),
+				asText(block.title) === undefined && asText(block.yLabel) === undefined
+					? null
+					: h(
+							'div',
+							{ className: `${P}-block-head` },
+							asText(block.title) === undefined ? null : h('div', { className: `${P}-block-title` }, block.title),
+							asText(block.yLabel) === undefined ? null : h('div', { className: `${P}-axis-caption` }, block.yLabel)
+						),
 				h(
 					'svg',
 					{ viewBox: `0 0 ${width} ${height}`, className: `${P}-svg`, role: 'img', 'aria-label': asText(block.title) ?? block.kind },
-					asText(block.yLabel) === undefined
-						? null
-						: h('text', { x: 2, y: pad.top - 2, className: `${P}-axis-label` }, block.yLabel),
 					ticks.map((tick, index) =>
 						h(
 							'g',
@@ -1049,43 +1053,65 @@ window.__ModuleLoader__.load({
 			const nodes = asArray(block.nodes).filter((node) => isPlainObject(node));
 			const edges = asArray(block.edges).filter((edge) => isPlainObject(edge));
 			const [selected, setSelected] = React.useState(null);
-			const width = 320;
-			const box = { width: 76, height: 30 };
+			const box = { width: 84, height: 30 };
+			const perRowCap = 4;
+			const slotGap = 64;
+			const slots = Math.max(1, Math.min(nodes.length || 1, perRowCap));
+			const width = slots * (box.width + slotGap);
+			const rows = Math.max(1, Math.ceil((nodes.length || 1) / perRowCap));
+			const cycleRadius = Math.min(Math.max(56, (box.width + 14) / (2 * Math.sin(Math.PI / Math.max(2, nodes.length)))), 96);
+			const height = layout === 'cycle' ? 2 * cycleRadius + box.height + 40 : 14 + rows * (box.height + 34);
 			const positions = new Map();
 			if (layout === 'cycle') {
-				const radius = Math.min(width, 180) / 2 - 40;
 				nodes.forEach((node, index) => {
 					const angle = (index / Math.max(1, nodes.length)) * Math.PI * 2 - Math.PI / 2;
-					positions.set(node.id, { x: width / 2 + Math.cos(angle) * radius - box.width / 2, y: 90 + Math.sin(angle) * radius - box.height / 2 });
-				});
-			} else if (layout === 'tree') {
-				const perRow = Math.min(nodes.length, 4);
-				nodes.forEach((node, index) => {
-					const row = Math.floor(index / perRow);
-					const inRow = Math.min(perRow, nodes.length - row * perRow);
-					const column = index % perRow;
 					positions.set(node.id, {
-						x: ((column + 0.5) * width) / inRow - box.width / 2,
-						y: 14 + row * (box.height + 34)
+						x: width / 2 + Math.cos(angle) * cycleRadius - box.width / 2,
+						y: height / 2 + Math.sin(angle) * cycleRadius - box.height / 2
 					});
 				});
 			} else {
-				const perRow = Math.min(nodes.length, 4);
 				nodes.forEach((node, index) => {
-					const row = Math.floor(index / perRow);
-					const inRow = Math.min(perRow, nodes.length - row * perRow);
-					const column = index % perRow;
+					const row = Math.floor(index / perRowCap);
+					const inRow = Math.min(perRowCap, nodes.length - row * perRowCap);
+					const column = index % perRowCap;
 					positions.set(node.id, {
 						x: ((column + 0.5) * width) / inRow - box.width / 2,
 						y: 14 + row * (box.height + 34)
 					});
 				});
 			}
-			const rows = Math.max(1, Math.ceil(nodes.length / Math.min(nodes.length || 1, 4)));
-			const height = layout === 'cycle' ? 180 : 14 + rows * (box.height + 34);
 			const centreOf = (id) => {
 				const at = positions.get(id);
 				return at === undefined ? undefined : { x: at.x + box.width / 2, y: at.y + box.height / 2 };
+			};
+			/** Rendered width of a label in viewBox units, at the edge-label font size. */
+			const labelUnits = (text) =>
+				[...String(text)].reduce((sum, ch) => sum + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5), 0);
+			/** A label trimmed so `units(label) <= max`. */
+			const fitUnits = (text, max) => {
+				let used = 0;
+				let out = '';
+				for (const ch of String(text)) {
+					const units = /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5;
+					if (used + units > max) return `${out}…`;
+					used += units;
+					out += ch;
+				}
+				return String(text);
+			};
+			/** A node label trimmed to the node box, so it never spills over the border. */
+			const fitNodeLabel = (value) => {
+				const text = display(value);
+				let used = 0;
+				let out = '';
+				for (const ch of text) {
+					const units = /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 10 : 5.6;
+					if (used + units > box.width - 12) return `${out}…`;
+					used += units;
+					out += ch;
+				}
+				return text;
 			};
 			const chosen = nodes.find((node) => node.id === selected);
 			return h(
@@ -1099,16 +1125,37 @@ window.__ModuleLoader__.load({
 						const from = centreOf(edge.from);
 						const to = centreOf(edge.to);
 						if (from === undefined || to === undefined) return null;
+						const rawLabel = asText(edge.label);
+						const dx = to.x - from.x;
+						const dy = to.y - from.y;
+						const label = rawLabel === undefined ? undefined : fitUnits(rawLabel, Math.abs(dx) >= Math.abs(dy) ? slotGap - 12 : 160);
+						const distance = Math.hypot(dx, dy);
+						const ux = distance === 0 ? 0 : dx / distance;
+						const uy = distance === 0 ? 0 : dy / distance;
+						const enter = Math.min(
+							dx === 0 ? Infinity : (box.width / 2 + 3) / Math.abs(dx),
+							dy === 0 ? Infinity : (box.height / 2 + 3) / Math.abs(dy)
+						);
+						const trim = Number.isFinite(enter) && enter < 0.5 ? enter : 0;
+						const start = { x: from.x + dx * trim, y: from.y + dy * trim };
+						const end = { x: to.x - dx * trim, y: to.y - dy * trim };
+						const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+						const half = label === undefined ? 0 : labelUnits(label) / 2 + 4;
+						const stop = { x: mid.x - ux * half, y: mid.y - uy * half };
+						const resume = { x: mid.x + ux * half, y: mid.y + uy * half };
 						return h(
 							'g',
 							{ key: index },
-							h('line', { x1: from.x, y1: from.y, x2: to.x, y2: to.y, className: `${P}-edge` }),
-							asText(edge.label) === undefined
+							h('line', { x1: start.x, y1: start.y, x2: stop.x, y2: stop.y, className: `${P}-edge` }),
+							label === undefined
+								? null
+								: h('line', { x1: resume.x, y1: resume.y, x2: end.x, y2: end.y, className: `${P}-edge` }),
+							label === undefined
 								? null
 								: h(
 										'text',
-										{ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 - 3, className: `${P}-edge-label`, textAnchor: 'middle' },
-										edge.label
+										{ x: mid.x, y: mid.y + 3, className: `${P}-edge-label`, textAnchor: 'middle' },
+										label
 									)
 						);
 					}),
@@ -1135,7 +1182,7 @@ window.__ModuleLoader__.load({
 							h(
 								'text',
 								{ x: at.x + box.width / 2, y: at.y + box.height / 2 + 4, className: `${P}-node-label`, textAnchor: 'middle' },
-								display(node.label)
+								fitNodeLabel(node.label)
 							)
 						);
 					})
@@ -1750,6 +1797,8 @@ window.__ModuleLoader__.load({
 .${P}-body { display: flex; flex-direction: column; gap: 14px; padding: 14px; }
 .${P}-foot { padding: 0 14px 10px; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, inherit)); font-size: var(--dsw-font-xxs-12, 12px); }
 .${P}-block-title { font-weight: 600; margin-bottom: 6px; }
+.${P}-block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.${P}-axis-caption { flex: none; color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, inherit)); font-size: 11px; }
 
 .${P}-section { display: flex; flex-direction: column; gap: 6px; }
 .${P}-section-title { margin: 0; font-size: 1em; font-weight: 600; }
@@ -1802,7 +1851,7 @@ window.__ModuleLoader__.load({
 .${P}-chart { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .${P}-svg { display: block; width: 100%; height: auto; overflow: visible; }
 .${P}-grid { stroke: var(--dsw-alias-border-l1, rgba(128,128,128,.25)); stroke-width: 1; }
-.${P}-axis-tick, .${P}-axis-label, .${P}-edge-label { fill: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, inherit)); font-size: 9px; }
+.${P}-axis-tick, .${P}-edge-label { fill: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary, inherit)); font-size: 9px; }
 .${P}-bar { transition: opacity .12s ease; }
 .${P}-slice { stroke: var(--dsw-alias-bg-layer-1, transparent); stroke-width: 1; }
 .${P}-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; }

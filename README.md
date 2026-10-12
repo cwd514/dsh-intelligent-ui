@@ -29,6 +29,40 @@ ChatGPT の Intelligent UI に相当する機能を DeepSeek Harness (DSH) に�
 対応する要素は 15 種類（`section` / `row` / `text` / `callout` / `divider` / `stat` / `table` / `chart` / `comparison` / `timeline` / `diagram` / `tabs` / `inputs` / `calc` / `buttons`）、ネストは 6 段まで。
 `inputs` と `calc` はブラウザ側で完結して再計算し、`buttons[].message` と `inputs.submit.message` は `{{name}}` を現在値に置換してユーザーの発言として送信します。
 
+## カードの種類（全 15 種）
+
+以下はすべて、実際の DSH Web GUI で `render_ui` を呼んで描画した結果をそのまま切り出したものです（ライトテーマ）。5 枚で 15 種類すべてを網羅しています。
+
+### レイアウト — `section` / `row` / `text` / `callout` / `divider` / `stat`
+
+`section` で区切り、`row` で数字を並べ、`divider` で切り、`callout` で結論を出します。`text` は `lead` / `body` / `caption` の 3 段階。
+
+![レイアウト系ブロック（section / row / text / callout / divider / stat）](docs/blocks-layout.jpg)
+
+### データ — `chart` / `table`
+
+`chart` は `bar` / `line` / `pie` を描き、`table` は見出しクリックで並べ替え（`sortable`）、`format` で `number` / `percent` を整形します。
+
+![グラフと表（chart / table）](docs/blocks-data.jpg)
+
+### 比較と手順 — `comparison` / `timeline`
+
+`comparison` は選択肢を横に並べ、`timeline` は順序のある話を `at` 付きで見せます。
+
+![比較と手順（comparison / timeline）](docs/blocks-compare.jpg)
+
+### 関係と並列 — `diagram` / `tabs`
+
+`diagram` は `flow` / `tree` / `cycle` のレイアウトで、ノードを選ぶと `detail` が出ます。`tabs` は並列の答えを切り替えます。
+
+![関係図とタブ（diagram / tabs）](docs/blocks-diagram.jpg)
+
+### 対話 — `inputs` / `calc` / `buttons`
+
+`inputs` の値を変えると `calc` がその場で再計算します（この例は「年間契約」を入れた状態の ¥10,800）。`buttons` は発言を送るか、ファイルを開きます。
+
+![入力・再計算・ボタン（inputs / calc / buttons）](docs/blocks-interactive.jpg)
+
 ## インストール
 
 ### 1. Plugin Manager から（推奨）
@@ -113,6 +147,7 @@ DSH Web GUI（`http://127.0.0.1:3080`）で実際に確認しました。
 - `inputs` / `calc` の再計算（プラン変更 → ¥0、席数 40 → ¥48,000）
 - ボタンのコピー操作、`inputActions` が実アプリから渡っていること（`interactive: true`）
 - ライト/ダーク両テーマでの配色
+- 15 種類すべてのブロックの実描画（README のギャラリー `docs/blocks-*.jpg` はその実キャプチャ）
 - 日本語表示（英語・中国語の辞書は自動テストで検証）
 
 ## 既知の制約
@@ -147,6 +182,10 @@ Cloning the repository and installing its absolute path works as well.
 | Turn complete | one line pointing below | the view |
 
 The Tool call row lives inside the collapsible Tool group, which folds away once the Turn completes. When the Turn closes, ownership of the settled view moves to the Turn tail (`conversation.chat.turnTail`) — outside that group, right under the closing prose — so the view stays part of the answer and is never shown twice.
+
+### Card gallery
+
+Every one of the 15 block types, captured from the real GUI: [layout (section / row / text / callout / divider / stat)](docs/blocks-layout.jpg) · [chart / table](docs/blocks-data.jpg) · [comparison / timeline](docs/blocks-compare.jpg) · [diagram / tabs](docs/blocks-diagram.jpg) · [inputs / calc / buttons](docs/blocks-interactive.jpg).
 
 ### Configuration
 
