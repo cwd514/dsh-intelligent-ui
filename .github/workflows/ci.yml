@@ -27,5 +27,5 @@ jobs:
           node --check index.js
           node --check client.js
 
-      - name: Smoke test (158 checks)
+      - name: Smoke test (163 checks)
         run: node test/smoke.mjs

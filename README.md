@@ -117,17 +117,17 @@ client.js       クライアント側: 2 つのスロット実装（描画・状
 catalog.md      モデルに読ませる要素カタログ（ランタイムスキルの本体）
 cordis.patch.yml バンドルの挿入と config
 locale/*.json   Plugin 一覧に出す名前と説明（ja/en）
-test/smoke.mjs  ホスト 63 件 + クライアント 95 件の自動テスト
+test/smoke.mjs  ホスト 63 件 + クライアント 100 件の自動テスト
 ```
 
 ## テスト
 
 ```
 npm run check   # node --check
-npm test        # 158 件のスモークテスト（ホスト 63 / クライアント 95）
+npm test        # 163 件のスモークテスト（ホスト 63 / クライアント 100）
 ```
 
-クライアント側は `vm.runInThisContext` で `window.__ModuleLoader__` に登録し、最小の React スタブでツリーを組み立てて検証します。デバッグ用に `window.__dshIntelligentUi`（`looseJson` / `sanitizeSpec` / `compileExpr` / `niceTicks` / `lastRender` …）を公開しています。
+クライアント側は `vm.runInThisContext` で `window.__ModuleLoader__` に登録し、最小の React スタブでツリーを組み立てて検証します。デバッグ用に `window.__dshIntelligentUi`（`looseJson` / `sanitizeSpec` / `compileExpr` / `niceTicks` / `diagramEdge` / `lastRender` …）を公開しています。
 
 ## 動作確認済みの範囲
 
@@ -187,7 +187,7 @@ Optional keys under `config` in `cordis.patch.yml`: `enabled` (true), `posture` 
 
 ```
 npm run check   # node --check
-npm test        # 158 smoke checks (63 host / 95 client)
+npm test        # 163 smoke checks (63 host / 100 client)
 ```
 
 The client half is loaded into a Node `vm` context against a minimal React stub: slot registration, spec sanitising, the `calc` parser, the streaming argument reader, the settled-view hand-off and the Turn tail are all covered. The same checks run in GitHub Actions.

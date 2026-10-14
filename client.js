@@ -1047,6 +1047,86 @@ window.__ModuleLoader__.load({
 			);
 		}
 
+		/** Rendered width of a label in viewBox units, at the edge-label font size. */
+		function labelUnits(text) {
+			return [...String(text)].reduce((sum, ch) => sum + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5), 0);
+		}
+
+		/** A label trimmed so `units(label) <= max`. */
+		function fitUnits(text, max) {
+			let used = 0;
+			let out = '';
+			for (const ch of String(text)) {
+				const units = /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5;
+				if (used + units > max) return `${out}…`;
+				used += units;
+				out += ch;
+			}
+			return String(text);
+		}
+
+		/** How far inside a node border an edge stops, so the stroke always meets the box. */
+		const EDGE_INSET = 1.5;
+		/** Padding between an edge label and the two line pieces it interrupts. */
+		const LABEL_PAD = 4;
+		/** Shortest line piece worth drawing on either side of an on-line label. */
+		const LABEL_MIN_PIECE = 6;
+		/** Distance from the line for a label too wide to sit on it. */
+		const LABEL_ASIDE = 8;
+
+		/**
+		 * Geometry for one edge: the line between two node boxes, split only when its
+		 * label fits whole in the gap. An edge that cannot carry its label on the line
+		 * stays in one piece and hangs the label beside it, so no edge is ever left
+		 * dangling in mid-air. Returns `undefined` when the two ends coincide.
+		 *
+		 * @param from - centre of the source node, in viewBox units.
+		 * @param to - centre of the target node, in viewBox units.
+		 * @param box - node box size.
+		 * @param rawLabel - the edge label, when it has one.
+		 */
+		function diagramEdge(from, to, box, rawLabel) {
+			const dx = to.x - from.x;
+			const dy = to.y - from.y;
+			const distance = Math.hypot(dx, dy);
+			if (distance < 1) return undefined;
+			const ux = dx / distance;
+			const uy = dy / distance;
+			/* Distance from a box centre to its border, along the edge direction. */
+			const reach = Math.min(
+				ux === 0 ? Infinity : box.width / 2 / Math.abs(ux),
+				uy === 0 ? Infinity : box.height / 2 / Math.abs(uy)
+			);
+			/*
+			 * Stop just inside the border (the boxes are drawn over the edges) and never
+			 * past the midpoint, so a short edge can never turn its two ends around.
+			 */
+			const trim = Math.min(Math.max(0, reach - EDGE_INSET), Math.max(0, distance / 2 - 0.5));
+			const start = { x: from.x + ux * trim, y: from.y + uy * trim };
+			const end = { x: to.x - ux * trim, y: to.y - uy * trim };
+			const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+			const room = distance - 2 * trim;
+			/* The label only takes the line when it still leaves a piece on both sides. */
+			const onLine = rawLabel !== undefined && labelUnits(rawLabel) + LABEL_PAD * 2 + LABEL_MIN_PIECE * 2 <= room;
+			const half = onLine ? labelUnits(rawLabel) / 2 + LABEL_PAD : 0;
+			return {
+				start,
+				end,
+				/** The first piece: the whole edge unless a label sits on the line. */
+				head: onLine ? { x: mid.x - ux * half, y: mid.y - uy * half } : end,
+				/** The closing piece, drawn only under an on-line label. */
+				tail: onLine ? { x: mid.x + ux * half, y: mid.y + uy * half } : undefined,
+				label:
+					rawLabel === undefined
+						? undefined
+						: {
+								text: onLine ? rawLabel : fitUnits(rawLabel, 120),
+								x: mid.x + (onLine ? 0 : uy * LABEL_ASIDE),
+								y: mid.y + (onLine ? 0 : -ux * LABEL_ASIDE) + 3
+							}
+			};
+		}
+
 		/** Nodes and edges; selecting a node reveals its detail. */
 		function DiagramBlock({ block, rc }) {
 			const layout = asEnum(block.layout, ['flow', 'tree', 'cycle'], 'flow');
@@ -1085,21 +1165,6 @@ window.__ModuleLoader__.load({
 				const at = positions.get(id);
 				return at === undefined ? undefined : { x: at.x + box.width / 2, y: at.y + box.height / 2 };
 			};
-			/** Rendered width of a label in viewBox units, at the edge-label font size. */
-			const labelUnits = (text) =>
-				[...String(text)].reduce((sum, ch) => sum + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5), 0);
-			/** A label trimmed so `units(label) <= max`. */
-			const fitUnits = (text, max) => {
-				let used = 0;
-				let out = '';
-				for (const ch of String(text)) {
-					const units = /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 9 : 5;
-					if (used + units > max) return `${out}…`;
-					used += units;
-					out += ch;
-				}
-				return String(text);
-			};
 			/** A node label trimmed to the node box, so it never spills over the border. */
 			const fitNodeLabel = (value) => {
 				const text = display(value);
@@ -1125,37 +1190,38 @@ window.__ModuleLoader__.load({
 						const from = centreOf(edge.from);
 						const to = centreOf(edge.to);
 						if (from === undefined || to === undefined) return null;
-						const rawLabel = asText(edge.label);
-						const dx = to.x - from.x;
-						const dy = to.y - from.y;
-						const label = rawLabel === undefined ? undefined : fitUnits(rawLabel, Math.abs(dx) >= Math.abs(dy) ? slotGap - 12 : 160);
-						const distance = Math.hypot(dx, dy);
-						const ux = distance === 0 ? 0 : dx / distance;
-						const uy = distance === 0 ? 0 : dy / distance;
-						const enter = Math.min(
-							dx === 0 ? Infinity : (box.width / 2 + 3) / Math.abs(dx),
-							dy === 0 ? Infinity : (box.height / 2 + 3) / Math.abs(dy)
-						);
-						const trim = Number.isFinite(enter) && enter < 0.5 ? enter : 0;
-						const start = { x: from.x + dx * trim, y: from.y + dy * trim };
-						const end = { x: to.x - dx * trim, y: to.y - dy * trim };
-						const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-						const half = label === undefined ? 0 : labelUnits(label) / 2 + 4;
-						const stop = { x: mid.x - ux * half, y: mid.y - uy * half };
-						const resume = { x: mid.x + ux * half, y: mid.y + uy * half };
+						const geometry = diagramEdge(from, to, box, asText(edge.label));
+						if (geometry === undefined) return null;
 						return h(
 							'g',
 							{ key: index },
-							h('line', { x1: start.x, y1: start.y, x2: stop.x, y2: stop.y, className: `${P}-edge` }),
-							label === undefined
+							h('line', {
+								x1: geometry.start.x,
+								y1: geometry.start.y,
+								x2: geometry.head.x,
+								y2: geometry.head.y,
+								className: `${P}-edge`
+							}),
+							geometry.tail === undefined
 								? null
-								: h('line', { x1: resume.x, y1: resume.y, x2: end.x, y2: end.y, className: `${P}-edge` }),
-							label === undefined
+								: h('line', {
+										x1: geometry.tail.x,
+										y1: geometry.tail.y,
+										x2: geometry.end.x,
+										y2: geometry.end.y,
+										className: `${P}-edge`
+									}),
+							geometry.label === undefined
 								? null
 								: h(
 										'text',
-										{ x: mid.x, y: mid.y + 3, className: `${P}-edge-label`, textAnchor: 'middle' },
-										label
+										{
+											x: geometry.label.x,
+											y: geometry.label.y,
+											className: `${P}-edge-label`,
+											textAnchor: 'middle'
+										},
+										geometry.label.text
 									)
 						);
 					}),
@@ -2065,6 +2131,7 @@ window.__ModuleLoader__.load({
 				runExpr,
 				formatValue,
 				niceTicks,
+				diagramEdge,
 				callStatus,
 				turnViews,
 				interpolate,

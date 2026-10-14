@@ -1,6 +1,6 @@
 {
   "name": "@local/dsh-intelligent-ui",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "ChatGPT の Intelligent UI 相当。モデルが文章ではなく対話的なビジュアル回答を選べるようにするプラグイン",
   "license": "MIT",

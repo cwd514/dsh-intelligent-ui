@@ -896,6 +896,112 @@ assert.equal(diagramNodes.length, 2);
 assert.equal(diagramNodes[0].props.role, 'button', 'a diagram node is selectable');
 ok('the chart draws token-coloured bars and the diagram makes nodes selectable');
 
+// --- diagram edges: a line that stops in mid-air reads as a broken diagram
+
+/** The view this plugin was reported to break: five nodes, a decision below, one label. */
+const EDGE_SPEC = {
+	blocks: [
+		{
+			type: 'diagram',
+			layout: 'flow',
+			nodes: [
+				{ id: 'purpose', label: '会の目的' },
+				{ id: 'model', label: '動かす対象' },
+				{ id: 'dist', label: '配布手段' },
+				{ id: 'risk', label: '未解決の齟齬' },
+				{ id: 'mtg', label: '正式決定' }
+			],
+			edges: [
+				{ from: 'purpose', to: 'model' },
+				{ from: 'model', to: 'dist' },
+				{ from: 'dist', to: 'mtg' },
+				{ from: 'risk', to: 'mtg', label: '要確認' }
+			]
+		}
+	]
+};
+const edgeView = render({ meta: hook.sanitizeSpec(EDGE_SPEC) });
+const boxes = byClass(edgeView, 'dsh-iui-node-box');
+const edgeLines = byClass(edgeView, 'dsh-iui-edge');
+assert.equal(boxes.length, 5);
+assert.equal(edgeLines.length, 5, 'three plain edges in one piece, plus the two around 要確認');
+const drawn = edgeLines.map((line) => ({ x1: line.props.x1, y1: line.props.y1, x2: line.props.x2, y2: line.props.y2 }));
+const boxSize = { width: boxes[0].props.width, height: boxes[0].props.height };
+/** Node centres straight from the rendered boxes, so the check follows the real layout. */
+const centres = new Map(
+	EDGE_SPEC.blocks[0].nodes.map((node, index) => [
+		node.id,
+		{ x: boxes[index].props.x + boxSize.width / 2, y: boxes[index].props.y + boxSize.height / 2 }
+	])
+);
+for (const edge of EDGE_SPEC.blocks[0].edges) {
+	const from = centres.get(edge.from);
+	const to = centres.get(edge.to);
+	const dx = to.x - from.x;
+	const dy = to.y - from.y;
+	const length = Math.hypot(dx, dy);
+	const ux = dx / length;
+	const uy = dy / length;
+	/* Computed here, not in the view: how far the centre line travels inside a box. */
+	const trim = Math.min(boxSize.width / 2 / Math.abs(ux), boxSize.height / 2 / Math.abs(uy));
+	/** Distance along the edge of a point that lies on it. */
+	const along = (point) => (point.x - from.x) * ux + (point.y - from.y) * uy;
+	/** Perpendicular distance from the edge line, so a neighbouring edge is not counted. */
+	const across = (point) => Math.abs((point.x - from.x) * uy - (point.y - from.y) * ux);
+	const own = drawn.filter((line) => {
+		const ends = [
+			{ x: line.x1, y: line.y1 },
+			{ x: line.x2, y: line.y2 }
+		];
+		return ends.every((point) => across(point) < 1 && along(point) > -2 && along(point) < length + 2);
+	});
+	assert.ok(own.length > 0, `the ${edge.from}→${edge.to} edge is drawn`);
+	const reached = own.flatMap((line) => [along({ x: line.x1, y: line.y1 }), along({ x: line.x2, y: line.y2 })]);
+	assert.ok(Math.min(...reached) <= trim + 2, `${edge.from}→${edge.to} starts on its own box`);
+	assert.ok(Math.max(...reached) >= length - trim - 2, `${edge.from}→${edge.to} reaches the far box`);
+}
+ok('every edge of the reported view is drawn box to box');
+
+/** The helper's own contract, including the shapes the layout above never produces. */
+const BOX = { width: 84, height: 30 };
+const NEAR = { x: 74, y: 29 };
+const FAR = { x: 222, y: 29 };
+/** How far outside a node box centred on `at` a point sits (negative = inside it). */
+const borderGap = (point, at) =>
+	Math.max(Math.abs(point.x - at.x) - BOX.width / 2, Math.abs(point.y - at.y) - BOX.height / 2);
+const anchored = (point, at) => Math.abs(borderGap(point, at)) <= 2;
+
+const plainEdge = hook.diagramEdge(NEAR, FAR, BOX);
+assert.equal(plainEdge.tail, undefined, 'an unlabelled edge is a single line');
+assert.ok(anchored(plainEdge.start, NEAR) && anchored(plainEdge.end, FAR), 'an unlabelled edge meets both boxes');
+assert.ok(plainEdge.head.x - plainEdge.start.x >= 60, 'an unlabelled edge spans its whole gap');
+ok(`an unlabelled edge spans ${plainEdge.head.x - plainEdge.start.x} of the 64 units between the boxes`);
+
+const fitting = hook.diagramEdge(NEAR, FAR, BOX, '要確認');
+assert.ok(fitting.tail !== undefined, 'a label that fits splits the line');
+assert.ok(anchored(fitting.start, NEAR) && anchored(fitting.end, FAR), 'a labelled edge still meets both boxes');
+assert.ok(Math.abs(fitting.tail.x - fitting.head.x - 35) < 0.001, 'the gap is the label plus its padding');
+assert.ok(fitting.head.x - fitting.start.x >= 6 && fitting.end.x - fitting.tail.x >= 6, 'the label leaves a piece on both sides');
+ok('a 要確認 label interrupts its line by exactly 35 units and no more');
+
+const crowded = hook.diagramEdge(NEAR, FAR, BOX, 'とても長いラベルで収まらない場合の確認用テキスト');
+assert.equal(crowded.tail, undefined, 'a label too wide for the gap leaves the line in one piece');
+assert.ok(anchored(crowded.start, NEAR) && anchored(crowded.end, FAR), 'the line still reaches both boxes');
+assert.ok(crowded.label.text.endsWith('…') && crowded.label.y < crowded.start.y, 'the long label is trimmed and moves off the line');
+ok('an over-long label moves beside the line instead of cutting it open');
+
+const vertical = hook.diagramEdge(NEAR, { x: 74, y: 93 }, BOX, '要確認');
+assert.equal(vertical.tail, undefined, 'a label cannot take a line that is all gap');
+assert.ok(anchored(vertical.start, NEAR) && anchored(vertical.end, { x: 74, y: 93 }), 'a vertical edge meets both boxes');
+assert.ok(vertical.label.x > vertical.start.x, 'a vertical label sits beside the line');
+
+const diagonal = hook.diagramEdge(NEAR, { x: 296, y: 93 }, BOX, '要確認');
+assert.ok(diagonal.tail !== undefined, 'a long diagonal has room for the label on the line');
+assert.ok(anchored(diagonal.start, NEAR) && anchored(diagonal.end, { x: 296, y: 93 }), 'a diagonal edge meets both boxes');
+
+assert.equal(hook.diagramEdge(NEAR, NEAR, BOX), undefined, 'two nodes on one spot draw no edge');
+ok('vertical and diagonal edges keep both ends on their boxes and still show the label');
+
 const calc = byClass(nodes, 'dsh-iui-calc-value')[0];
 assert.equal(calc.text, '¥12,000/月', 'the calc reads the seeded input values');
 ok(`calc evaluates against the current inputs → ${calc.text}`);
